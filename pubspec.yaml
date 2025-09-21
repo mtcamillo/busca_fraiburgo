@@ -1,0 +1,33 @@
+name: busca_fraiburgo
+description: App Busca Fraiburgo (MVP)
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  supabase_flutter: ^2.5.6
+  # google_maps_flutter: ^2.6.1
+  provider: ^6.1.2
+  intl: ^0.19.0
+  shared_preferences: ^2.3.2
+  url_launcher: ^6.3.0
+  cached_network_image: ^3.3.1
+  # google_maps_cluster_manager: ^3.0.0
+  google_maps_flutter: ^2.13.1
+  flutter_dotenv: ^6.0.0
+  # google_maps_cluster_manager: 3.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env
