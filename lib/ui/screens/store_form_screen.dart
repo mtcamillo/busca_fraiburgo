@@ -9,7 +9,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/supabase_service.dart';
 
 class StoreFormScreen extends StatefulWidget {
-  const StoreFormScreen({super.key});
+  final String? storeId;
+
+  const StoreFormScreen({super.key, this.storeId});
 
   @override
   State<StoreFormScreen> createState() => _StoreFormScreenState();
@@ -18,17 +20,18 @@ class StoreFormScreen extends StatefulWidget {
 class _StoreFormScreenState extends State<StoreFormScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  String? _name;
-  String? _categoryId;
-  String? _whatsapp;
-  String? _instagram;
-  String? _desc;
+  final _nameCtrl = TextEditingController();
+  final _whatsappCtrl = TextEditingController();
+  final _instagramCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
 
   final _ruaCtrl = TextEditingController();
   final _numeroCtrl = TextEditingController();
   final _bairroCtrl = TextEditingController();
   final _cepCtrl = TextEditingController();
-  final _cidadeCtrl = TextEditingController(); 
+  final _cidadeCtrl = TextEditingController();
+
+  String? _categoryId;
 
   String? _cidadeFromCep;
   String? _ufFromCep;
@@ -40,8 +43,8 @@ class _StoreFormScreenState extends State<StoreFormScreen> {
   String? _error;
 
   List<Map<String, dynamic>> _categories = [];
-
   String? _mapsKey;
+  bool _addressEdited = false;
 
   Map<String, dynamic> _hoursJson = _defaultHours();
 
@@ -69,13 +72,25 @@ class _StoreFormScreenState extends State<StoreFormScreen> {
   @override
   void initState() {
     super.initState();
-    _loadCategories();
     _mapsKey = dotenv.env['GOOGLE_MAPS_KEY'];
     _cepCtrl.addListener(_onCepChanged);
+    for (final c in [_ruaCtrl, _numeroCtrl, _bairroCtrl, _cepCtrl]) {
+      c.addListener(() => _addressEdited = true);
+    }
+
+    _loadCategories();
+    if (widget.storeId != null) {
+      _loadStore(widget.storeId!); 
+    }
   }
 
   @override
   void dispose() {
+    _nameCtrl.dispose();
+    _whatsappCtrl.dispose();
+    _instagramCtrl.dispose();
+    _descCtrl.dispose();
+
     _ruaCtrl.dispose();
     _numeroCtrl.dispose();
     _bairroCtrl.dispose();
@@ -90,9 +105,64 @@ class _StoreFormScreenState extends State<StoreFormScreen> {
           .from('categories')
           .select('id, name')
           .order('name');
-      setState(() => _categories = List<Map<String, dynamic>>.from(res as List));
+      setState(() {
+        _categories = List<Map<String, dynamic>>.from(res as List);
+      });
     } catch (_) {
       setState(() => _error = 'Falha ao carregar categorias');
+    }
+  }
+
+  Future<void> _loadStore(String id) async {
+    try {
+      final data = await SupabaseService.client
+        .from('stores')
+        .select('id, name, category_id, whatsapp, instagram, short_desc, '
+                'address_street, address_number, address_bairro, address_cep, '
+                'address_city, address_uf, '
+                'geo_lat, geo_lng, hours_json')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (data != null) {
+        _nameCtrl.text = (data['name'] ?? '') as String;
+        _whatsappCtrl.text = (data['whatsapp'] ?? '') as String;
+        _instagramCtrl.text = (data['instagram'] ?? '') as String;
+        _descCtrl.text = (data['short_desc'] ?? '') as String;
+        _categoryId = data['category_id']?.toString();
+        _ruaCtrl.text    = (data['address_street'] ?? '') as String;
+        _numeroCtrl.text = (data['address_number'] ?? '') as String;
+        _bairroCtrl.text = (data['address_bairro'] ?? '') as String;
+        _cepCtrl.text    = (data['address_cep'] ?? '') as String;
+        _cidadeFromCep   = (data['address_city'] ?? '') as String?;
+        _ufFromCep       = (data['address_uf'] ?? '') as String?;
+        _cidadeCtrl.text = [
+          _cidadeFromCep ?? '',
+          if ((_ufFromCep ?? '').isNotEmpty) _ufFromCep
+        ].where((e) => (e ?? '').isNotEmpty).join(' / ');
+
+        _lat = (data['geo_lat'] as num?)?.toDouble();
+        _lng = (data['geo_lng'] as num?)?.toDouble();
+
+      final hj = data['hours_json'];
+      if (hj is Map<String, dynamic>) {
+        _hoursJson = {
+          "tz": hj["tz"] ?? "America/Sao_Paulo",
+          "monday": List<Map<String, dynamic>>.from(hj["monday"] ?? []),
+          "tuesday": List<Map<String, dynamic>>.from(hj["tuesday"] ?? []),
+          "wednesday": List<Map<String, dynamic>>.from(hj["wednesday"] ?? []),
+          "thursday": List<Map<String, dynamic>>.from(hj["thursday"] ?? []),
+          "friday": List<Map<String, dynamic>>.from(hj["friday"] ?? []),
+          "saturday": List<Map<String, dynamic>>.from(hj["saturday"] ?? []),
+          "sunday": List<Map<String, dynamic>>.from(hj["sunday"] ?? []),
+        };
+      }
+      _addressEdited = false;
+
+      setState(() {});
+    }
+    } catch (_) {
+      setState(() => _error = 'Falha ao carregar a loja para edição.');
     }
   }
 
@@ -233,13 +303,18 @@ class _StoreFormScreenState extends State<StoreFormScreen> {
     }
   }
 
+  bool _shouldGeocodeBeforeSave() {
+    if (_addressEdited) return true;
+    if (_lat == null || _lng == null) return true;
+    return false;
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    _formKey.currentState!.save();
 
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) {
-      setState(() => _error = 'Você precisa estar logado para cadastrar uma loja.');
+      setState(() => _error = 'Você precisa estar logado para cadastrar/editar loja.');
       return;
     }
     if (_categoryId == null) {
@@ -248,36 +323,51 @@ class _StoreFormScreenState extends State<StoreFormScreen> {
     }
 
     setState(() => _error = null);
-    final ok = await _geocode();
-    if (!ok) return;
+
+    if (_shouldGeocodeBeforeSave()) {
+      final ok = await _geocode();
+      if (!ok) return;
+    }
 
     setState(() => _saving = true);
 
     try {
-      final insert = {
-        'name': _name,
+      final payload = <String, dynamic>{
+        if (widget.storeId != null) 'id': widget.storeId,
+        'user_id': user.id,
+        'name': _nameCtrl.text.trim(),
         'category_id': _categoryId,
-        'whatsapp': _whatsapp,
-        'instagram': _instagram,
-        'short_desc': _desc,
+        'whatsapp': _whatsappCtrl.text.trim(),
+        'instagram': _instagramCtrl.text.trim(),
+        'short_desc': _descCtrl.text.trim(),
+        'address_street': _ruaCtrl.text.trim(),
+        'address_number': _numeroCtrl.text.trim(),
         'address_bairro': _bairroCtrl.text.trim(),
+        'address_cep': _cepCtrl.text.trim(),
+        'address_city': _cidadeFromCep, 
+        'address_uf': _ufFromCep,       
+
         'geo_lat': _lat,
         'geo_lng': _lng,
         'hours_json': _hoursJson,
-        'user_id': user.id,
         'status': 'published',
         'verified': false,
       };
 
+
       final res = await SupabaseService.client
           .from('stores')
-          .insert(insert)
+          .upsert(payload)
           .select('id')
           .single();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Loja cadastrada com sucesso!')),
+        SnackBar(
+          content: Text(widget.storeId == null
+              ? 'Loja cadastrada com sucesso!'
+              : 'Loja atualizada com sucesso!'),
+        ),
       );
       Navigator.of(context).pop(res['id'] as String);
     } catch (e) {
@@ -303,7 +393,9 @@ class _StoreFormScreenState extends State<StoreFormScreen> {
   @override
   Widget build(BuildContext context) {
     String _hoursSummary() {
-      final days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+      final days = [
+        'monday','tuesday','wednesday','thursday','friday','saturday','sunday'
+      ];
       int intervals = 0;
       for (final d in days) {
         intervals += (_hoursJson[d] as List).length;
@@ -314,201 +406,205 @@ class _StoreFormScreenState extends State<StoreFormScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Cadastrar loja')),
+      appBar: AppBar(
+        title: Text(widget.storeId == null ? 'Cadastrar loja' : 'Editar loja'),
+      ),
       body: SafeArea(
-        child: _categories.isEmpty && _error == null
-            ? const Center(child: CircularProgressIndicator())
-            : SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    children: [
-                      if (_error != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: Material(
-                            color: Colors.red.withOpacity(.1),
-                            borderRadius: BorderRadius.circular(8),
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.error, color: Colors.red),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(_error!, style: const TextStyle(color: Colors.red)),
-                                  ),
-                                ],
-                              ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              children: [
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Material(
+                      color: Colors.red.withOpacity(.1),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.error, color: Colors.red),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(_error!,
+                                  style: const TextStyle(color: Colors.red)),
                             ),
-                          ),
-                        ),
-
-                      // nome
-                      TextFormField(
-                        decoration: const InputDecoration(
-                          labelText: 'Nome da loja *',
-                          prefixIcon: Icon(Icons.store),
-                        ),
-                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Informe o nome' : null,
-                        onSaved: (v) => _name = v?.trim(),
-                      ),
-                      const SizedBox(height: 12),
-
-                      // categoria
-                      DropdownButtonFormField<String>(
-                        decoration: const InputDecoration(
-                          labelText: 'Categoria *',
-                          prefixIcon: Icon(Icons.category),
-                        ),
-                        items: _categories
-                            .map((c) => DropdownMenuItem(
-                                  value: c['id'] as String,
-                                  child: Text(c['name'] as String),
-                                ))
-                            .toList(),
-                        onChanged: (v) => _categoryId = v,
-                        validator: (v) => v == null ? 'Selecione a categoria' : null,
-                      ),
-                      const SizedBox(height: 12),
-
-                      // whatsapp
-                      TextFormField(
-                        decoration: const InputDecoration(
-                          labelText: 'WhatsApp',
-                          prefixIcon: Icon(Icons.phone),
-                          hintText: '5599999999999',
-                        ),
-                        keyboardType: TextInputType.phone,
-                        onSaved: (v) => _whatsapp = v?.trim(),
-                      ),
-                      const SizedBox(height: 12),
-
-                      // instagram
-                      TextFormField(
-                        decoration: const InputDecoration(
-                          labelText: 'Instagram',
-                          prefixIcon: Icon(Icons.alternate_email),
-                          hintText: 'ex.: @minhaloja',
-                        ),
-                        onSaved: (v) => _instagram = v?.trim(),
-                      ),
-                      const SizedBox(height: 12),
-
-                      // descrição
-                      TextFormField(
-                        decoration: const InputDecoration(
-                          labelText: 'Descrição breve',
-                          prefixIcon: Icon(Icons.info_outline),
-                        ),
-                        maxLines: 2,
-                        onSaved: (v) => _desc = v?.trim(),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // ENDEREÇO
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text('Endereço', style: Theme.of(context).textTheme.titleMedium),
-                      ),
-                      const SizedBox(height: 8),
-
-                      TextFormField(
-                        controller: _ruaCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Rua',
-                          prefixIcon: Icon(Icons.signpost_outlined),
-                        ),
-                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Informe a rua' : null,
-                      ),
-                      const SizedBox(height: 12),
-
-                      TextFormField(
-                        controller: _numeroCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Número',
-                          prefixIcon: Icon(Icons.numbers),
-                        ),
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Informe o número' : null,
-                      ),
-                      const SizedBox(height: 12),
-
-                      TextFormField(
-                        controller: _bairroCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Bairro',
-                          prefixIcon: Icon(Icons.location_city),
-                        ),
-                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Informe o bairro' : null,
-                      ),
-                      const SizedBox(height: 12),
-
-                      TextFormField(
-                        controller: _cepCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'CEP',
-                          prefixIcon: Icon(Icons.local_post_office_outlined),
-                          hintText: 'ex.: 89580000',
-                        ),
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        validator: (v) =>
-                            (v == null || _digits(v).length != 8) ? 'Informe um CEP válido (8 dígitos)' : null,
-                      ),
-                      const SizedBox(height: 12),
-
-                      TextFormField(
-                        controller: _cidadeCtrl,
-                        readOnly: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Cidade (auto via CEP)',
-                          prefixIcon: Icon(Icons.apartment_outlined),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 16),
+                    ),
+                  ),
 
-                      // HORÁRIOS
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.schedule),
-                        title: const Text('Horários'),
-                        subtitle: Text(_hoursSummary()),
-                        trailing: OutlinedButton.icon(
-                          icon: const Icon(Icons.edit_calendar),
-                          label: const Text('Editar'),
-                          onPressed: _openHoursEditor,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
+                TextFormField(
+                  controller: _nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Nome da loja *',
+                    prefixIcon: Icon(Icons.store),
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Informe o nome' : null,
+                ),
+                const SizedBox(height: 12),
 
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          icon: _saving
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                )
-                              : const Icon(Icons.check),
-                          label: Text(_saving ? 'Salvando...' : 'Salvar loja'),
-                          onPressed: _saving ? null : _submit,
-                        ),
-                      ),
-                    ],
+                DropdownButtonFormField<String>(
+                  value: _categoryId,
+                  decoration: const InputDecoration(
+                    labelText: 'Categoria *',
+                    prefixIcon: Icon(Icons.category),
+                  ),
+                  items: _categories
+                      .map((c) => DropdownMenuItem(
+                            value: c['id'] as String,
+                            child: Text(c['name'] as String),
+                          ))
+                      .toList(),
+                  onChanged: (v) => setState(() => _categoryId = v),
+                  validator: (v) =>
+                      v == null ? 'Selecione a categoria' : null,
+                ),
+                const SizedBox(height: 12),
+
+                TextFormField(
+                  controller: _whatsappCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'WhatsApp',
+                    prefixIcon: Icon(Icons.phone),
+                    hintText: '5599999999999',
+                  ),
+                  keyboardType: TextInputType.phone,
+                ),
+                const SizedBox(height: 12),
+
+                TextFormField(
+                  controller: _instagramCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Instagram',
+                    prefixIcon: Icon(Icons.alternate_email),
+                    hintText: 'ex.: @minhaloja',
                   ),
                 ),
-              ),
+                const SizedBox(height: 12),
+
+                TextFormField(
+                  controller: _descCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Descrição breve',
+                    prefixIcon: Icon(Icons.info_outline),
+                  ),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 16),
+
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Endereço',
+                      style: Theme.of(context).textTheme.titleMedium),
+                ),
+                const SizedBox(height: 8),
+
+                TextFormField(
+                  controller: _ruaCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Rua',
+                    prefixIcon: Icon(Icons.signpost_outlined),
+                  ),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Informe a rua' : null,
+                ),
+                const SizedBox(height: 12),
+
+                TextFormField(
+                  controller: _numeroCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Número',
+                    prefixIcon: Icon(Icons.numbers),
+                  ),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Informe o número' : null,
+                ),
+                const SizedBox(height: 12),
+
+                TextFormField(
+                  controller: _bairroCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Bairro',
+                    prefixIcon: Icon(Icons.location_city),
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Informe o bairro' : null,
+                ),
+                const SizedBox(height: 12),
+
+                TextFormField(
+                  controller: _cepCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'CEP',
+                    prefixIcon: Icon(Icons.local_post_office_outlined),
+                    hintText: 'ex.: 89580000',
+                  ),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  validator: (v) =>
+                      (v == null || v.replaceAll(RegExp(r'[^0-9]'), '').length != 8)
+                          ? 'Informe um CEP válido (8 dígitos)'
+                          : null,
+                ),
+                const SizedBox(height: 12),
+
+                TextFormField(
+                  controller: _cidadeCtrl,
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Cidade (auto via CEP)',
+                    prefixIcon: Icon(Icons.apartment_outlined),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // HORÁRIOS
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.schedule),
+                  title: const Text('Horários'),
+                  subtitle: Text(_hoursSummary()),
+                  trailing: OutlinedButton.icon(
+                    icon: const Icon(Icons.edit_calendar),
+                    label: const Text('Editar'),
+                    onPressed: _openHoursEditor,
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    icon: _saving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.check),
+                    label: Text(_saving
+                        ? 'Salvando...'
+                        : (widget.storeId == null
+                            ? 'Salvar loja'
+                            : 'Atualizar loja')),
+                    onPressed: _saving ? null : _submit,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 }
-
-
-/// Estrutura: { "monday": [ {"open":"09:00","close":"12:00"}, {"open":"13:30","close":"18:00"} ], ... }
 class HoursEditor extends StatefulWidget {
   final Map<String, dynamic> initial;
   const HoursEditor({super.key, required this.initial});
@@ -537,13 +633,10 @@ class _HoursEditorState extends State<HoursEditor> {
       "tz": widget.initial["tz"] ?? "America/Sao_Paulo",
       "monday": List<Map<String, dynamic>>.from(widget.initial["monday"] ?? []),
       "tuesday": List<Map<String, dynamic>>.from(widget.initial["tuesday"] ?? []),
-      "wednesday":
-          List<Map<String, dynamic>>.from(widget.initial["wednesday"] ?? []),
-      "thursday":
-          List<Map<String, dynamic>>.from(widget.initial["thursday"] ?? []),
+      "wednesday": List<Map<String, dynamic>>.from(widget.initial["wednesday"] ?? []),
+      "thursday": List<Map<String, dynamic>>.from(widget.initial["thursday"] ?? []),
       "friday": List<Map<String, dynamic>>.from(widget.initial["friday"] ?? []),
-      "saturday":
-          List<Map<String, dynamic>>.from(widget.initial["saturday"] ?? []),
+      "saturday": List<Map<String, dynamic>>.from(widget.initial["saturday"] ?? []),
       "sunday": List<Map<String, dynamic>>.from(widget.initial["sunday"] ?? []),
     };
   }
@@ -574,7 +667,7 @@ class _HoursEditorState extends State<HoursEditor> {
     for (int i = 0; i < intervals.length; i++) {
       final aOpen = toMin(intervals[i]['open']);
       final aClose = toMin(intervals[i]['close']);
-      if (aOpen >= aClose) return false; 
+      if (aOpen >= aClose) return false;
 
       if (i < intervals.length - 1) {
         final bOpen = toMin(intervals[i + 1]['open']);
@@ -740,7 +833,8 @@ class _HoursEditorState extends State<HoursEditor> {
                     const SizedBox(height: 12),
                     Text(
                       'Fuso horário: ${_data["tz"]}',
-                      style: const TextStyle(fontSize: 12, color: Colors.black54),
+                      style:
+                          const TextStyle(fontSize: 12, color: Colors.black54),
                     ),
                   ],
                 ),
@@ -763,7 +857,9 @@ class _HoursEditorState extends State<HoursEditor> {
                         if (!_validateAll()) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text('Verifique os horários: abertura < fechamento e sem sobreposição.'),
+                              content: Text(
+                                'Verifique os horários: abertura < fechamento e sem sobreposição.',
+                              ),
                             ),
                           );
                           return;

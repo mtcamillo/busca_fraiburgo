@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/supabase_service.dart';
@@ -25,36 +26,93 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
     _load();
   }
 
-    Future<void> _load() async {
+  Future<void> _load() async {
     setState(() { _loading = true; _error = null; });
     try {
-        final s = await SupabaseService.client
-            .from('stores')
-            .select(
-            'id,name,short_desc,instagram,whatsapp,phone,address_street,address_bairro,address_city,geo_lat,geo_lng,hours_json,verified'
-            )
-            .eq('id', widget.storeId)
-            .single();
+      final s = await SupabaseService.client
+          .from('stores')
+          .select(
+            'id,name,short_desc,instagram,whatsapp,phone,'
+            'address_street,address_number,address_bairro,address_city,address_uf,address_cep,'
+            'geo_lat,geo_lng,hours_json,verified'
+          )
+          .eq('id', widget.storeId)
+          .single();
 
-        _store = Map<String, dynamic>.from(s as Map);
+      _store = Map<String, dynamic>.from(s as Map);
 
-        final user = SupabaseService.client.auth.currentUser;
-        if (user != null) {
+      final user = SupabaseService.client.auth.currentUser;
+      if (user != null) {
         final fav = await SupabaseService.client
             .from('favorites')
             .select('store_id')
             .eq('user_id', user.id)
             .eq('store_id', widget.storeId);
-
         _isFav = (fav as List).isNotEmpty;
-        }
+      }
     } catch (_) {
-        _error = 'Falha ao carregar loja';
+      _error = 'Falha ao carregar loja';
     } finally {
-        setState(() { _loading = false; });
+      setState(() { _loading = false; });
     }
   }
 
+  bool _has(String? s) => s != null && s.trim().isNotEmpty;
+
+  String _composeAddress(Map<String, dynamic> s) {
+    final p1 = [
+      (s['address_street'] ?? '').toString().trim(),
+      (s['address_number'] ?? '').toString().trim(),
+    ].where(_has).join(', ');
+
+    final p2 = (s['address_bairro'] ?? '').toString().trim();
+    final city = (s['address_city'] ?? '').toString().trim();
+    final uf   = (s['address_uf'] ?? '').toString().trim();
+    final cityUf = [city, uf].where(_has).join(' - ');
+    final cep = (s['address_cep'] ?? '').toString().trim();
+
+    return [
+      if (_has(p1)) p1,
+      if (_has(p2)) p2,
+      if (_has(cityUf)) cityUf,
+      if (_has(cep)) 'CEP: $cep',
+    ].join('\n');
+  }
+
+  Future<void> _openMapsSmart(Map<String, dynamic> s) async {
+    final name = (s['name'] ?? '').toString();
+    final lat  = (s['geo_lat'] as num?)?.toDouble();
+    final lng  = (s['geo_lng'] as num?)?.toDouble();
+
+    if (lat != null && lng != null) {
+      final uri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng($name)');
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    }
+
+    // fallback por endereço
+    final addr = _composeAddress(s).replaceAll('\n', ', ');
+    if (_has(addr)) {
+      final q = Uri.encodeComponent('$addr ($name)');
+      final uri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$q');
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    }
+  }
+
+  Future<void> _copyAddress(Map<String, dynamic> s) async {
+    final txt = _composeAddress(s);
+    if (_has(txt)) {
+      await Clipboard.setData(ClipboardData(text: txt));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Endereço copiado')),
+      );
+    }
+  }
 
   Future<void> _toggleFav() async {
     final user = SupabaseService.client.auth.currentUser;
@@ -88,7 +146,6 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
   }
 
   Future<void> _openWhatsApp(String raw) async {
-    // aceita “5541999999999” ou “(49) 99999-9999”
     final digits = raw.replaceAll(RegExp(r'\D'), '');
     final uri = Uri.parse('https://wa.me/$digits');
     if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -99,11 +156,6 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
         ? urlOrUser
         : 'https://instagram.com/${urlOrUser.replaceAll('@', '')}';
     final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
-
-  Future<void> _openMaps(double lat, double lng, String name) async {
-    final uri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng($name)');
     if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
@@ -131,6 +183,8 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
     }
 
     final s = _store!;
+    final addressText = _composeAddress(s);
+    final isThree = addressText.split('\n').length >= 3;
     return Scaffold(
       appBar: AppBar(
         title: Text(s['name'] ?? ''),
@@ -144,7 +198,7 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if ((s['short_desc'] ?? '').toString().isNotEmpty)
+          if (_has((s['short_desc'] ?? '').toString()))
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(s['short_desc'], style: const TextStyle(fontSize: 16)),
@@ -157,16 +211,17 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
           Card(
             child: Column(
               children: [
-                ListTile(
-                  leading: const Icon(Icons.phone),
-                  title: Text(s['whatsapp'] ?? ''),
-                  trailing: ElevatedButton.icon(
-                    onPressed: () => _openWhatsApp(s['whatsapp'] ?? ''),
-                    icon: const Icon(Icons.chat),
-                    label: const Text('WhatsApp'),
+                if (_has(s['whatsapp']?.toString() ?? ''))
+                  ListTile(
+                    leading: const Icon(Icons.phone),
+                    title: Text(s['whatsapp'] ?? ''),
+                    trailing: ElevatedButton.icon(
+                      onPressed: () => _openWhatsApp(s['whatsapp'] ?? ''),
+                      icon: const Icon(Icons.chat),
+                      label: const Text('WhatsApp'),
+                    ),
                   ),
-                ),
-                if ((s['instagram'] ?? '').toString().isNotEmpty)
+                if (_has(s['instagram']?.toString() ?? ''))
                   ListTile(
                     leading: const Icon(Icons.camera_alt_outlined),
                     title: Text(s['instagram']),
@@ -175,17 +230,22 @@ class _StoreDetailScreenState extends State<StoreDetailScreen> {
                       child: const Text('Abrir Instagram'),
                     ),
                   ),
-                if ((s['address_street'] ?? '').toString().isNotEmpty || s['geo_lat'] != null)
+                if (_has(addressText))
                   ListTile(
                     leading: const Icon(Icons.place),
-                    title: Text('${s['address_street'] ?? ''} - ${s['address_bairro'] ?? ''}, ${s['address_city'] ?? ''}'),
-                    trailing: OutlinedButton(
-                      onPressed: (s['geo_lat'] != null && s['geo_lng'] != null)
-                          ? () => _openMaps((s['geo_lat'] as num).toDouble(), (s['geo_lng'] as num).toDouble(), s['name'])
-                          : null,
-                      child: const Text('Ver no mapa'),
+                    title: const Text('Endereço'),
+                    subtitle: Text(addressText),           
+                    isThreeLine: isThree,                   
+                    trailing: Wrap(
+                      spacing: 8,
+                      children: [
+                        OutlinedButton(
+                          onPressed: () => _openMapsSmart(s),
+                          child: const Text('Ver no mapa'),
+                        ),
+                      ],
                     ),
-                  ),
+                  )
               ],
             ),
           ),
