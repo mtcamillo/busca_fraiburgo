@@ -9,16 +9,16 @@ class CategoriesScreen extends StatefulWidget {
   State<CategoriesScreen> createState() => _CategoriesScreenState();
 }
 
-const Map<String, IconData> iconMap = {
-  'checkroom': Icons.checkroom,
-  'print': Icons.print,
-  'home_repair_service': Icons.home_repair_service,
-  'health_and_safety': Icons.health_and_safety,
-  'restaurant': Icons.restaurant,
-  'pet_supplies': Icons.pets,
-  'store': Icons.store,
-  'park': Icons.park,
-};
+// const Map<String, IconData> iconMap = {
+//   'checkroom': Icons.checkroom,
+//   'print': Icons.print,
+//   'home_repair_service': Icons.home_repair_service,
+//   'health_and_safety': Icons.health_and_safety,
+//   'restaurant': Icons.restaurant,
+//   'pet_supplies': Icons.pets,
+//   'store': Icons.store,
+//   'park': Icons.park,
+// };
 
 class _CategoriesScreenState extends State<CategoriesScreen> {
   bool _loading = true;
@@ -71,14 +71,14 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
         itemBuilder: (_, i) {
           final row = _items[i];
           final String name = (row['name'] ?? 'Sem nome') as String;
-          final String? iconKey = row['icon'] as String?;
-          final IconData leadingIcon = iconMap[iconKey] ?? Icons.help_outline;
+          // final String? iconKey = row['icon'] as String?;
+          // final IconData leadingIcon = iconMap[iconKey] ?? Icons.help_outline;
 
           return Card(
             child: ListTile(
-              leading: Icon(leadingIcon),
+              // leading: Icon(leadingIcon),
               title: Text(name),
-              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              // trailing: const Icon(Icons.arrow_forward_ios, size: 16),
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(

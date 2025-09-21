@@ -120,6 +120,21 @@ class ProfileScreen extends StatelessWidget {
                         child: FilledButton.icon(
                           icon: const Icon(Icons.add_business),
                           label: const Text('cadastre sua loja'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.blue,      
+                            foregroundColor: Colors.white,      
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            textStyle: const TextStyle(       
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           onPressed: () {
                             Navigator.of(context).push(
                               MaterialPageRoute(

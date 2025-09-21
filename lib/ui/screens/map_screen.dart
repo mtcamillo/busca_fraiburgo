@@ -164,6 +164,10 @@ class _MapScreenState extends State<MapScreen> {
                   FilterChip(
                     label: const Text('Aberto agora'),
                     selected: _onlyOpen,
+                      shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(999),
+                      side: const BorderSide(color: Colors.green),
+                    ),
                     onSelected: (v) {
                       setState(() => _onlyOpen = v);
                       _scheduleFetchViewport();
