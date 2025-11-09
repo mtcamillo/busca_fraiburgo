@@ -53,3 +53,4 @@ linux/flutter/ephemeral/
 .env
 .env.*
 lib/config/secrets.dart
+node_modules/
