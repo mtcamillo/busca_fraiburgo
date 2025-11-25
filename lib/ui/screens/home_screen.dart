@@ -38,12 +38,12 @@ class _HomeScreenState extends State<HomeScreen> {
       List<Map<String, dynamic>> stores;
       try {
         final res = await SupabaseService.client
-            .from('v_stores_cover')
-            .select('id, name, short_desc, verified, cover_path, status')
-            .eq('status', 'published')
-            .order('verified', ascending: false)
-            .order('name')
-            .limit(12);
+          .from('v_stores_cover')
+          .select('id, name, short_desc, verified, cover_path, image_url, status')
+          .eq('status', 'published')
+          .order('verified', ascending: false)
+          .order('name')
+          .limit(12);
         stores = List<Map<String, dynamic>>.from(res as List);
       } catch (_) {
         final res = await SupabaseService.client
@@ -192,7 +192,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
           if (_featured.isNotEmpty)
             SizedBox(
-              height: 280, // = altura do card
+              height: 480, 
               child: PageView.builder(
                 scrollDirection: Axis.vertical,
                 controller: PageController(viewportFraction: 0.92),
